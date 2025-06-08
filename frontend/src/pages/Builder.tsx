@@ -151,7 +151,8 @@ export function Builder() {
   }, [files, webcontainer]);
 
   async function init() {
-    const response = await axios.post(`${BACKEND_URL}/template`, {
+    const templateUrl = new URL('template', BACKEND_URL.trim()).toString();
+    const response = await axios.post(templateUrl, {
       prompt: prompt.trim()
     });
     setTemplateSet(true);
@@ -164,7 +165,8 @@ export function Builder() {
     })));
 
     setLoading(true);
-    const stepsResponse = await axios.post(`${BACKEND_URL}/chat`, {
+    const chatUrl = new URL('chat', BACKEND_URL.trim()).toString();
+    const stepsResponse = await axios.post(chatUrl, {
       messages: [...prompts, prompt].map(content => ({
         role: "user",
         content
@@ -223,7 +225,8 @@ export function Builder() {
                     };
 
                     setLoading(true);
-                    const stepsResponse = await axios.post(`${BACKEND_URL}/chat`, {
+                    const chatUrl = new URL('chat', BACKEND_URL.trim()).toString();
+                    const stepsResponse = await axios.post(chatUrl, {
                       messages: [...llmMessages, newMessage]
                     });
                     setLoading(false);
