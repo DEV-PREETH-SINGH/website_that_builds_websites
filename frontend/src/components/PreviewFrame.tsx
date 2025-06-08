@@ -6,6 +6,8 @@ interface PreviewFrameProps {
   webContainer: WebContainer;
 }
 
+const INSTALL_TIMEOUT = 120000; // 2 minutes timeout
+
 export function PreviewFrame({ files, webContainer }: PreviewFrameProps) {
   const [url, setUrl] = useState("");
   const [error, setError] = useState("");
@@ -70,35 +72,63 @@ export default defineConfig({
 
         setStatus("Installing dependencies...\nThis might take a few minutes...");
         console.log("Starting npm install...");
-        const installProcess = await webContainer.spawn('npm', ['install']);
+        
+        let installTimeout: NodeJS.Timeout;
+        try {
+          const installProcess = await webContainer.spawn('npm', ['install']);
+          
+          const installPromise = new Promise((resolve, reject) => {
+            let output = '';
+            
+            installTimeout = setTimeout(() => {
+              reject(new Error('Installation timed out after 2 minutes'));
+            }, INSTALL_TIMEOUT);
 
-        const installExitCode = await new Promise((resolve) => {
-          installProcess.output.pipeTo(new WritableStream({
-            write(data) {
-              console.log('Install output:', data);
-              setStatus(prev => `${prev}\n${data}`);
-            }
-          }));
-          installProcess.exit.then(resolve);
-        });
+            installProcess.output.pipeTo(new WritableStream({
+              write(data) {
+                output += data;
+                console.log('Install output:', data);
+                setStatus(prev => `${prev}\n${data}`);
+              }
+            }));
 
-        if (installExitCode !== 0) {
-          throw new Error(`Installation failed with code ${installExitCode}`);
+            installProcess.exit.then((code) => {
+              clearTimeout(installTimeout);
+              if (code !== 0) {
+                reject(new Error(`Installation failed with code ${code}\nOutput: ${output}`));
+              } else {
+                resolve(code);
+              }
+            });
+          });
+
+          await installPromise;
+        } catch (err: any) {
+          clearTimeout(installTimeout!);
+          throw new Error(`npm install failed: ${err?.message || 'Unknown error during installation'}`);
         }
 
         setStatus("Starting development server...");
         console.log("Starting dev server...");
         const devProcess = await webContainer.spawn('npm', ['run', 'dev']);
         
+        let devOutput = '';
         devProcess.output.pipeTo(new WritableStream({
           write(data) {
+            devOutput += data;
             console.log('Dev server output:', data);
             setStatus(prev => `${prev}\n${data}`);
           }
         }));
 
+        // Set a timeout for the dev server to start
+        const devServerTimeout = setTimeout(() => {
+          setError('Development server failed to start within 1 minute');
+        }, 60000);
+
         // Wait for server-ready event
         webContainer.on('server-ready', (port, url) => {
+          clearTimeout(devServerTimeout);
           console.log('Server ready on port:', port);
           console.log('URL:', url);
           setUrl(url);
@@ -114,6 +144,12 @@ export default defineConfig({
       console.log('Starting preview with files:', files);
       main();
     }
+
+    // Cleanup function
+    return () => {
+      // Stop any running processes when component unmounts
+      webContainer?.spawn('pkill', ['-f', 'node']);
+    };
   }, [webContainer, files]);
 
   if (error) {
@@ -124,6 +160,12 @@ export default defineConfig({
           <pre className="text-sm text-left max-h-60 overflow-auto p-4 bg-gray-800 rounded whitespace-pre-wrap">
             {status}
           </pre>
+          <button 
+            onClick={() => window.location.reload()}
+            className="mt-4 px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
+          >
+            Retry
+          </button>
         </div>
       </div>
     );
